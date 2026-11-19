@@ -1,0 +1,638 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#eef1f5" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1218" media="(prefers-color-scheme: dark)">
+<meta name="description" content="Personal time tracker: start/stop clock, manual entries, daily totals.">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" type="image/png" href="icons/icon-192.png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Timecard">
+<title>Daily Timecard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a punch-clock card on the left (start, stop, log), the day-by-day time card grid on the right. */
+:root {
+  --bg: #eef1f5; --surface: #ffffff; --sunk: #f5f7fa; --ink: #131923; --muted: #5a6575;
+  --line: #dbe1e9; --accent: #2348b5; --accent-ink: #ffffff; --danger: #b8323f; --ok: #1d7a55;
+  --f-display: "Bricolage Grotesque", "Segoe UI", system-ui, sans-serif;
+  --f-body: "Inter", system-ui, -apple-system, "Segoe UI", sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, "SFMono-Regular", Menlo, monospace;
+  --r: 10px;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --bg: #0e1218; --surface: #161b24; --sunk: #11161e; --ink: #e7ebf1; --muted: #97a2b2;
+  --line: #262e3c; --accent: #86a2ff; --accent-ink: #0e1218; --danger: #f07783; --ok: #5cc99a; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --bg: #0e1218; --surface: #161b24; --sunk: #11161e; --ink: #e7ebf1; --muted: #97a2b2;
+  --line: #262e3c; --accent: #86a2ff; --accent-ink: #0e1218; --danger: #f07783; --ok: #5cc99a; color-scheme: dark }
+
+* { box-sizing: border-box }
+html { -webkit-text-size-adjust: 100% }
+:root { padding-top: env(safe-area-inset-top, 0px); padding-bottom: env(safe-area-inset-bottom, 0px) }
+body { margin: 0 }
+[hidden] { display: none !important }
+img { max-width: 100% }
+body { background: var(--bg); color: var(--ink); font-family: var(--f-body); font-size: 15px; line-height: 1.5 }
+.wrap { max-width: 1180px; margin: 0 auto; padding-block: 20px 48px;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)) }
+header { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px 16px; margin-bottom: 18px }
+h1 { font-family: var(--f-display); font-weight: 700; font-size: 28px; letter-spacing: -0.01em; margin: 0 }
+h2 { font-family: var(--f-display); font-weight: 600; font-size: 17px; margin: 0; text-wrap: balance }
+.today { font-family: var(--f-mono); font-size: 13px; color: var(--muted) }
+.status { font-size: 12px; color: var(--muted); display: inline-flex; align-items: center; gap: 6px }
+.status i { width: 7px; height: 7px; border-radius: 50%; background: var(--muted); display: inline-block }
+.status.ok i { background: var(--ok) } .status.warn i { background: var(--danger) }
+.hdr-right { display: flex; gap: 14px; align-items: baseline; flex-wrap: wrap }
+
+.grid { display: grid; grid-template-columns: minmax(0, 360px) minmax(0, 1fr); gap: 18px; align-items: start }
+@media (max-width: 860px) { .grid { grid-template-columns: minmax(0, 1fr) } }
+.col { display: flex; flex-direction: column; gap: 18px; min-width: 0 }
+.panel { background: var(--surface); border: 1px solid var(--line); border-radius: var(--r); padding: 18px; min-width: 0 }
+.panel > h2 { margin-bottom: 12px }
+.label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); font-weight: 600 }
+
+/* Punch clock */
+.clock { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 44px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.1; margin: 6px 0 2px }
+.clock.idle { color: var(--muted) }
+.now-cat { display: flex; align-items: center; gap: 8px; font-weight: 600; min-height: 24px }
+.since { font-size: 13px; color: var(--muted) }
+.dot { width: 10px; height: 10px; border-radius: 3px; flex: none; display: inline-block }
+.now-actions { display: flex; gap: 8px; margin-top: 12px }
+.now-actions input { flex: 1; min-width: 0 }
+.cats { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin-top: 16px }
+.cat-btn { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line);
+  background: var(--sunk); color: var(--ink); font: 500 14px var(--f-body); cursor: pointer; text-align: left; min-width: 0 }
+.cat-btn span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.cat-btn:hover { border-color: var(--muted) }
+.cat-btn.on { border-color: var(--cat); box-shadow: inset 0 0 0 1px var(--cat); background: var(--surface) }
+.hint { font-size: 12.5px; color: var(--muted); margin: 10px 0 0 }
+
+/* Forms */
+input, select, button { font: inherit; color: inherit }
+input[type=text], input[type=date], input[type=time], select {
+  background: var(--sunk); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; width: 100%; min-width: 0 }
+input:focus-visible, select:focus-visible, button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px }
+.btn { border: 1px solid var(--line); background: var(--surface); border-radius: 8px; padding: 8px 14px; cursor: pointer; font-weight: 600; font-size: 14px; white-space: nowrap }
+.btn:hover { border-color: var(--muted) }
+.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-ink) }
+.btn.stop { background: var(--danger); border-color: var(--danger); color: var(--surface) }
+.btn:disabled { opacity: .45; cursor: default }
+.form { display: grid; grid-template-columns: 1fr 1fr; gap: 10px }
+.form .full { grid-column: 1 / -1 }
+.form label { display: flex; flex-direction: column; gap: 4px; font-size: 12.5px; color: var(--muted); min-width: 0 }
+.form-actions { display: flex; gap: 8px; grid-column: 1 / -1; align-items: center; flex-wrap: wrap }
+.form-msg { font-size: 12.5px; color: var(--muted) }
+
+/* Range tabs + summary */
+.toolbar { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; margin-bottom: 16px }
+.tabs { display: inline-flex; background: var(--sunk); border: 1px solid var(--line); border-radius: 9px; padding: 3px }
+.tabs button { border: 0; background: none; padding: 6px 12px; border-radius: 6px; cursor: pointer; font-weight: 500; font-size: 13.5px; color: var(--muted) }
+.tabs button[aria-pressed=true] { background: var(--surface); color: var(--ink); box-shadow: 0 1px 2px rgba(0,0,0,.08) }
+.figures { display: flex; flex-wrap: wrap; gap: 8px 28px; margin-bottom: 16px }
+.fig b { display: block; font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 22px; font-weight: 600 }
+.fig span { font-size: 12.5px; color: var(--muted) }
+.bars { display: flex; flex-direction: column; gap: 8px }
+.bar-row { display: grid; grid-template-columns: minmax(0, 130px) minmax(0, 1fr) 64px 40px; gap: 10px; align-items: center; font-size: 13.5px }
+.bar-row .nm { display: flex; align-items: center; gap: 7px; min-width: 0 }
+.bar-row .nm span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap }
+.track { height: 10px; background: var(--sunk); border-radius: 5px; overflow: hidden }
+.track div { height: 100%; border-radius: 5px }
+.num { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 12.5px; text-align: right }
+.num.pc { color: var(--muted) }
+
+/* Time card grid */
+.card-scroll { overflow-x: auto; margin-top: 4px }
+.tc { min-width: 480px }
+.tc-head, .tc-row { display: grid; grid-template-columns: 74px minmax(0, 1fr) 58px; gap: 10px; align-items: center }
+.tc-head { font-family: var(--f-mono); font-size: 11px; color: var(--muted); margin-bottom: 4px }
+.ticks { position: relative; height: 14px }
+.ticks span { position: absolute; transform: translateX(-50%) } .ticks span:first-child { transform: none } .ticks span:last-child { transform: translateX(-100%) }
+.tc-row { padding: 3px 0 }
+.tc-row .d { font-family: var(--f-mono); font-size: 12px; color: var(--muted); white-space: nowrap }
+.tc-row.is-today .d { color: var(--ink); font-weight: 600 }
+.strip { position: relative; height: 22px; background: var(--sunk); border-radius: 4px; overflow: hidden;
+  background-image: linear-gradient(to right, var(--line) 1px, transparent 1px); background-size: calc(100% / 24) 100% }
+.tc.dense .strip { height: 12px } .tc.dense .tc-row { padding: 1px 0 } .tc.dense .tc-row .d { font-size: 11px }
+.tc.single .strip { height: 40px }
+.blk { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; min-width: 2px }
+.blk.live { background-image: repeating-linear-gradient(45deg, rgba(255,255,255,.25) 0 4px, transparent 4px 8px) }
+.nowline { position: absolute; top: 0; bottom: 0; width: 2px; background: var(--ink); opacity: .55 }
+.tc-row .tot { font-family: var(--f-mono); font-variant-numeric: tabular-nums; font-size: 12px; text-align: right }
+
+/* Entries */
+.entries { display: flex; flex-direction: column; margin-top: 4px }
+.day-h { font-size: 12px; font-weight: 600; color: var(--muted); padding: 12px 0 4px; border-bottom: 1px solid var(--line) }
+.entry { display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 9px 0; border-bottom: 1px solid var(--line); font-size: 14px }
+.entry .what { min-width: 0 }
+.entry .what b { font-weight: 600 }
+.entry .what small { display: block; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere }
+.entry .when { font-family: var(--f-mono); font-size: 12px; color: var(--muted); text-align: right; white-space: nowrap }
+.entry .acts { display: flex; gap: 4px }
+.mini { border: 1px solid transparent; background: none; padding: 4px 8px; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: var(--muted) }
+.mini:hover { border-color: var(--line); color: var(--ink) }
+.mini.confirm { color: var(--danger); border-color: var(--danger) }
+@media (max-width: 520px) {
+  .entry { grid-template-columns: 10px minmax(0, 1fr) auto; }
+  .entry .acts { grid-column: 2 / -1; justify-content: flex-start }
+  .bar-row { grid-template-columns: minmax(0, 100px) minmax(0, 1fr) 58px; } .bar-row .pc { display: none }
+  .clock { font-size: 38px }
+}
+.empty { border: 1px dashed var(--line); border-radius: 8px; padding: 18px; color: var(--muted); font-size: 14px; text-align: center }
+
+/* Categories manager */
+details summary { cursor: pointer; font-family: var(--f-display); font-weight: 600; font-size: 17px; list-style: none; display: flex; justify-content: space-between; align-items: center }
+details summary::after { content: "Edit"; font-family: var(--f-body); font-size: 13px; color: var(--accent); font-weight: 500 }
+details[open] summary::after { content: "Done" }
+details summary::-webkit-details-marker { display: none }
+.cat-list { display: flex; flex-direction: column; gap: 8px; margin-top: 12px }
+.cat-edit { display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; gap: 8px; align-items: center }
+input[type=color] { width: 36px; height: 36px; border: 1px solid var(--line); border-radius: 8px; padding: 2px; background: var(--sunk); cursor: pointer }
+
+.footer-tools { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); align-items: center }
+.toast { position: fixed; left: 50%; bottom: calc(20px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); background: var(--ink); color: var(--bg);
+  padding: 10px 16px; border-radius: 8px; font-size: 14px; z-index: 20; max-width: calc(100% - 32px) }
+@media (prefers-reduced-motion: no-preference) { .toast { transition: opacity .2s } }
+</style>
+</head>
+<body>
+
+<div class="wrap">
+  <header>
+    <h1>Daily Timecard</h1>
+    <div class="hdr-right">
+      <span class="today" id="todayLabel"></span>
+      <span class="status" id="status"><i></i><span>Saved on this phone</span></span>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="panel" aria-labelledby="nowH">
+        <div class="label" id="nowH">Now</div>
+        <div class="clock idle" id="clock">0:00:00</div>
+        <div class="now-cat" id="nowCat"><span class="since">Not tracking. Tap an activity to start the clock.</span></div>
+        <div class="now-actions">
+          <input type="text" id="nowNote" placeholder="Note (optional), e.g. COA chapter 5" maxlength="140">
+          <button class="btn stop" id="stopBtn" disabled>Stop</button>
+        </div>
+        <div class="cats" id="catBtns"></div>
+        <p class="hint">Tapping another activity stops the current one and starts the new one.</p>
+      </section>
+
+      <section class="panel" aria-labelledby="logH">
+        <h2 id="logH">Log past time</h2>
+        <form class="form" id="manual" novalidate>
+          <label class="full">Activity<select id="mCat"></select></label>
+          <label class="full">Date<input type="date" id="mDate"></label>
+          <label>Start<input type="time" id="mStart"></label>
+          <label>End<input type="time" id="mEnd"></label>
+          <label class="full">Note<input type="text" id="mNote" maxlength="140" placeholder="Optional"></label>
+          <div class="form-actions">
+            <button class="btn primary" type="submit" id="mSubmit">Add entry</button>
+            <button class="btn" type="button" id="mCancel" hidden>Cancel edit</button>
+            <span class="form-msg" id="mMsg">An end time earlier than the start runs past midnight.</span>
+          </div>
+        </form>
+      </section>
+
+      <section class="panel">
+        <details id="catDetails">
+          <summary>Activities</summary>
+          <div class="cat-list" id="catList"></div>
+          <div class="cat-edit" style="margin-top:12px">
+            <input type="color" id="newColor" value="#3d8bd9" aria-label="New activity color">
+            <input type="text" id="newName" placeholder="New activity name" maxlength="30">
+            <button class="btn" id="addCat">Add</button>
+          </div>
+        </details>
+      </section>
+    </div>
+
+    <div class="col">
+      <section class="panel" aria-labelledby="sumH">
+        <div class="toolbar">
+          <h2 id="sumH">Where the time went</h2>
+          <div class="tabs" role="group" aria-label="Range">
+            <button data-range="1" aria-pressed="false">Today</button>
+            <button data-range="7" aria-pressed="true">7 days</button>
+            <button data-range="30" aria-pressed="false">30 days</button>
+          </div>
+        </div>
+        <div class="figures" id="figures"></div>
+        <div class="bars" id="bars"></div>
+      </section>
+
+      <section class="panel" aria-labelledby="cardH">
+        <h2 id="cardH">Time card</h2>
+        <div class="card-scroll"><div class="tc" id="tc"></div></div>
+      </section>
+
+      <section class="panel" aria-labelledby="entH">
+        <h2 id="entH">Entries</h2>
+        <div class="entries" id="entries"></div>
+        <div class="footer-tools">
+          <button class="btn" id="exportBtn">Export CSV</button>
+          <button class="btn" id="backupBtn">Back up</button>
+          <button class="btn" id="restoreBtn">Restore</button>
+          <input type="file" id="restoreFile" accept=".json,application/json" hidden>
+          <span class="form-msg" id="exportMsg">CSV covers the range selected above. Back up saves everything.</span>
+        </div>
+      </section>
+    </div>
+  </div>
+</div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const DEFAULT_CATS = [
+  { id: "study", name: "Self-study", color: "#3d6fd6" },
+  { id: "class", name: "Classes", color: "#8b5fd3" },
+  { id: "tutor", name: "Tutoring", color: "#d9822b" },
+  { id: "code", name: "Coding", color: "#1f9a78" },
+  { id: "exercise", name: "Exercise", color: "#d24b5c" },
+  { id: "phone", name: "Phone / social", color: "#c9a21a" },
+  { id: "sleep", name: "Sleep", color: "#5a6c90" },
+  { id: "break", name: "Meals & breaks", color: "#7d9b37" },
+];
+const LS_KEY = "daily-timecard-v1";
+const DAY = 86400000;
+
+let S = { categories: DEFAULT_CATS, running: null };
+let months = {};           // "m-YYYY-MM" -> { entryId: {id,catId,start,end,note} }
+let range = 7;
+let mode = "local";        // "local" | "db"
+let col = null;            // db collection for this viewer
+let downloads = null;
+let editingId = null;
+let writeChain = Promise.resolve();
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s ?? "").replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const pad = n => String(n).padStart(2, "0");
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+const monthId = t => { const d = new Date(t); return `m-${d.getFullYear()}-${pad(d.getMonth() + 1)}`; };
+const startOfDay = t => { const d = new Date(t); d.setHours(0, 0, 0, 0); return d.getTime(); };
+const addDays = (t, n) => { const d = new Date(t); d.setDate(d.getDate() + n); return d.getTime(); };
+const fmtTime = t => new Date(t).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+const fmtDur = ms => { const m = Math.round(ms / 60000); const h = Math.floor(m / 60); return h ? `${h}h ${pad(m % 60)}m` : `${m}m`; };
+const fmtClock = ms => { const s = Math.max(0, Math.floor(ms / 1000)); return `${Math.floor(s / 3600)}:${pad(Math.floor(s / 60) % 60)}:${pad(s % 60)}`; };
+const dateInput = t => { const d = new Date(t); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`; };
+const catOf = id => S.categories.find(c => c.id === id) || { id, name: "Removed activity", color: "#8a929e" };
+
+function toast(msg) {
+  const el = $("toast"); el.textContent = msg; el.hidden = false;
+  clearTimeout(toast.t); toast.t = setTimeout(() => { el.hidden = true; }, 2600);
+}
+function setStatus(kind, text) {
+  const el = $("status"); el.className = "status " + kind; el.lastElementChild.textContent = text;
+}
+
+/* ---------- storage ---------- */
+function saveLocal() {
+  try { localStorage.setItem(LS_KEY, JSON.stringify({ state: S, months })); } catch (e) {}
+}
+function loadLocal() {
+  try {
+    const raw = localStorage.getItem(LS_KEY); if (!raw) return;
+    const x = JSON.parse(raw);
+    if (x.state) S = { categories: x.state.categories || DEFAULT_CATS, running: x.state.running || null };
+    if (x.months) months = x.months;
+  } catch (e) {}
+}
+function queueWrite(fn) {
+  writeChain = writeChain.then(fn).catch(err => {
+    if (err && err.code === "quota_exceeded") toast("Storage is full. Export and delete old entries.");
+    else toast("Couldn't save that change. Check your connection.");
+  });
+}
+function persistState() {
+  if (mode === "local") return saveLocal();
+  queueWrite(() => col.doc("state").set({ kind: "state", categories: S.categories, running: S.running }));
+}
+function persistMonth(mid) {
+  if (mode === "local") return saveLocal();
+  queueWrite(() => {
+    const entries = JSON.parse(JSON.stringify(months[mid] || {}));
+    return col.doc(mid).set({ kind: "month", entries });
+  });
+}
+
+/* ---------- mutations ---------- */
+function putEntry(e) {
+  const mid = monthId(e.start);
+  months = { ...months, [mid]: { ...(months[mid] || {}), [e.id]: e } };
+  persistMonth(mid);
+}
+function removeEntry(id) {
+  for (const mid of Object.keys(months)) {
+    if (months[mid][id]) {
+      const copy = { ...months[mid] }; delete copy[id];
+      months = { ...months, [mid]: copy };
+      persistMonth(mid);
+      return;
+    }
+  }
+}
+function allEntries() {
+  const out = [];
+  for (const mid in months) for (const id in months[mid]) out.push(months[mid][id]);
+  return out;
+}
+function startCat(catId) {
+  const now = Date.now();
+  if (S.running && S.running.catId === catId) return;
+  if (S.running) finishRunning(now, true);
+  S = { ...S, running: { catId, start: now, note: $("nowNote").value.trim() } };
+  persistState(); render();
+}
+function finishRunning(now, quiet) {
+  const r = S.running; if (!r) return;
+  const note = $("nowNote").value.trim();
+  if (now - r.start >= 60000) putEntry({ id: uid(), catId: r.catId, start: r.start, end: now, note });
+  else if (!quiet) toast("Under a minute, so it wasn't saved.");
+  $("nowNote").value = "";
+  S = { ...S, running: null };
+}
+
+/* ---------- maths ---------- */
+function overlap(a0, a1, b0, b1) { return Math.max(0, Math.min(a1, b1) - Math.max(a0, b0)); }
+function entriesWithLive(now) {
+  const list = allEntries();
+  if (S.running) list.push({ id: "__live", catId: S.running.catId, start: S.running.start, end: now, note: S.running.note, live: true });
+  return list;
+}
+
+/* ---------- render ---------- */
+function renderNow() {
+  const r = S.running, now = Date.now();
+  $("stopBtn").disabled = !r;
+  $("clock").classList.toggle("idle", !r);
+  $("clock").textContent = r ? fmtClock(now - r.start) : "0:00:00";
+  if (r) {
+    const c = catOf(r.catId);
+    $("nowCat").innerHTML = `<span class="dot" style="background:${esc(c.color)}"></span><span>${esc(c.name)}</span><span class="since">since ${fmtTime(r.start)}</span>`;
+  } else {
+    $("nowCat").innerHTML = `<span class="since">Not tracking. Tap an activity to start the clock.</span>`;
+  }
+  $("catBtns").innerHTML = S.categories.map(c =>
+    `<button class="cat-btn${r && r.catId === c.id ? " on" : ""}" style="--cat:${esc(c.color)}" data-cat="${esc(c.id)}"><span class="dot" style="background:${esc(c.color)}"></span><span>${esc(c.name)}</span></button>`
+  ).join("");
+}
+
+function renderSelects() {
+  const sel = $("mCat"), cur = sel.value;
+  sel.innerHTML = S.categories.map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join("");
+  if (cur && S.categories.some(c => c.id === cur)) sel.value = cur;
+}
+
+function renderCatList() {
+  $("catList").innerHTML = S.categories.map(c => `
+    <div class="cat-edit" data-id="${esc(c.id)}">
+      <input type="color" value="${esc(c.color)}" data-f="color" id="cc-${esc(c.id)}" aria-label="Color for ${esc(c.name)}">
+      <input type="text" value="${esc(c.name)}" data-f="name" id="cn-${esc(c.id)}" maxlength="30" aria-label="Name">
+      <button class="mini" data-del="${esc(c.id)}">Remove</button>
+    </div>`).join("");
+}
+
+function renderStats() {
+  const now = Date.now();
+  const today0 = startOfDay(now);
+  const from = addDays(today0, -(range - 1)), to = addDays(today0, 1);
+  const list = entriesWithLive(now);
+  const byCat = {};
+  let total = 0;
+  for (const e of list) {
+    const ms = overlap(e.start, e.end, from, Math.min(to, now));
+    if (ms > 0) { byCat[e.catId] = (byCat[e.catId] || 0) + ms; total += ms; }
+  }
+  const elapsed = Math.min(to, now) - from;
+  const rows = Object.entries(byCat).sort((a, b) => b[1] - a[1]);
+  const top = rows[0];
+  const figs = [
+    [fmtDur(total), range === 1 ? "tracked today" : `tracked in ${range} days`],
+    [range === 1 ? fmtDur(Math.max(0, elapsed - total)) : fmtDur(total / range), range === 1 ? "of today not logged yet" : "per day on average"],
+  ];
+  if (top) figs.push([catOf(top[0]).name, `most time · ${fmtDur(top[1])}`]);
+  $("figures").innerHTML = figs.map(([b, s]) => `<div class="fig"><b>${esc(b)}</b><span>${esc(s)}</span></div>`).join("");
+  if (!rows.length) {
+    $("bars").innerHTML = `<div class="empty">Nothing logged in this range yet. Start the clock on the left, or add time you already spent.</div>`;
+    return;
+  }
+  const max = rows[0][1];
+  $("bars").innerHTML = rows.map(([id, ms]) => {
+    const c = catOf(id);
+    return `<div class="bar-row"><div class="nm"><span class="dot" style="background:${esc(c.color)}"></span><span>${esc(c.name)}</span></div>
+      <div class="track"><div style="width:${(ms / max * 100).toFixed(1)}%;background:${esc(c.color)}"></div></div>
+      <div class="num">${fmtDur(ms)}</div><div class="num pc">${Math.round(ms / total * 100)}%</div></div>`;
+  }).join("");
+}
+
+function renderCard() {
+  const now = Date.now(), today0 = startOfDay(now);
+  const list = entriesWithLive(now);
+  const tc = $("tc");
+  tc.className = "tc" + (range === 30 ? " dense" : range === 1 ? " single" : "");
+  const ticks = [["12a", 0], ["6a", 25], ["12p", 50], ["6p", 75], ["12a", 100]]
+    .map(([l, p]) => `<span style="left:${p}%">${l}</span>`).join("");
+  let html = `<div class="tc-head"><span></span><div class="ticks">${ticks}</div><span style="text-align:right">total</span></div>`;
+  for (let i = 0; i < range; i++) {
+    const d0 = addDays(today0, -i), d1 = addDays(d0, 1), span = d1 - d0;
+    let tot = 0, blocks = "";
+    for (const e of list) {
+      const s = Math.max(e.start, d0), en = Math.min(e.end, d1);
+      if (en <= s) continue;
+      tot += en - s;
+      const c = catOf(e.catId);
+      blocks += `<div class="blk${e.live ? " live" : ""}" title="${esc(c.name)} · ${fmtTime(e.start)}–${e.live ? "now" : fmtTime(e.end)}" style="left:${((s - d0) / span * 100).toFixed(3)}%;width:${((en - s) / span * 100).toFixed(3)}%;background:${esc(c.color)}"></div>`;
+    }
+    if (i === 0) blocks += `<div class="nowline" style="left:${((now - d0) / span * 100).toFixed(2)}%"></div>`;
+    const lab = i === 0 ? "Today" : new Date(d0).toLocaleDateString([], { weekday: "short", day: "numeric" });
+    html += `<div class="tc-row${i === 0 ? " is-today" : ""}"><span class="d">${esc(lab)}</span><div class="strip">${blocks}</div><span class="tot">${tot ? fmtDur(tot) : "–"}</span></div>`;
+  }
+  tc.innerHTML = html;
+}
+
+function renderEntries() {
+  const now = Date.now(), today0 = startOfDay(now);
+  const from = addDays(today0, -(range - 1));
+  const list = allEntries().filter(e => e.end > from).sort((a, b) => b.start - a.start);
+  if (!list.length) {
+    $("entries").innerHTML = `<div class="empty">Your entries will be listed here, newest first. Each one can be edited or deleted.</div>`;
+    return;
+  }
+  let html = "", lastDay = null;
+  for (const e of list) {
+    const d = startOfDay(e.start);
+    if (d !== lastDay) {
+      lastDay = d;
+      html += `<div class="day-h">${d === today0 ? "Today" : new Date(d).toLocaleDateString([], { weekday: "long", day: "numeric", month: "short" })}</div>`;
+    }
+    const c = catOf(e.catId);
+    html += `<div class="entry"><span class="dot" style="background:${esc(c.color)}"></span>
+      <div class="what"><b>${esc(c.name)}</b>${e.note ? `<small>${esc(e.note)}</small>` : ""}</div>
+      <div class="when">${fmtTime(e.start)}–${fmtTime(e.end)}<br>${fmtDur(e.end - e.start)}</div>
+      <div class="acts"><button class="mini" data-edit="${esc(e.id)}">Edit</button><button class="mini" data-rm="${esc(e.id)}">Delete</button></div></div>`;
+  }
+  $("entries").innerHTML = html;
+}
+
+function render() {
+  $("todayLabel").textContent = new Date().toLocaleDateString([], { weekday: "long", day: "numeric", month: "long", year: "numeric" });
+  renderNow(); renderSelects(); renderStats(); renderCard(); renderEntries();
+  if (!$("catDetails").contains(document.activeElement)) renderCatList();
+}
+
+/* ---------- events ---------- */
+$("catBtns").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-cat]"); if (b) startCat(b.dataset.cat);
+});
+$("stopBtn").addEventListener("click", () => { finishRunning(Date.now(), false); persistState(); render(); });
+$("nowNote").addEventListener("change", () => {
+  if (!S.running) return;
+  S = { ...S, running: { ...S.running, note: $("nowNote").value.trim() } }; persistState();
+});
+
+document.querySelector(".tabs").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-range]"); if (!b) return;
+  range = +b.dataset.range;
+  document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-pressed", String(x === b)));
+  try { localStorage.setItem(LS_KEY + "-range", String(range)); } catch (e) {}
+  renderStats(); renderCard(); renderEntries();
+});
+
+function resetForm() {
+  editingId = null;
+  $("mSubmit").textContent = "Add entry"; $("mCancel").hidden = true;
+  $("mNote").value = ""; $("mStart").value = ""; $("mEnd").value = "";
+  $("mDate").value = dateInput(Date.now());
+  $("mMsg").textContent = "An end time earlier than the start runs past midnight.";
+}
+$("manual").addEventListener("submit", ev => {
+  ev.preventDefault();
+  const date = $("mDate").value, st = $("mStart").value, en = $("mEnd").value;
+  if (!date || !st || !en) { $("mMsg").textContent = "Pick a date, a start time and an end time."; return; }
+  const [y, mo, d] = date.split("-").map(Number);
+  const [sh, sm] = st.split(":").map(Number), [eh, em] = en.split(":").map(Number);
+  const start = new Date(y, mo - 1, d, sh, sm).getTime();
+  let end = new Date(y, mo - 1, d, eh, em).getTime();
+  if (end <= start) end += DAY;
+  if (end > Date.now() + 60000) { $("mMsg").textContent = "That ends in the future. Use the clock for time you're spending now."; return; }
+  if (editingId) removeEntry(editingId);
+  putEntry({ id: editingId || uid(), catId: $("mCat").value, start, end, note: $("mNote").value.trim() });
+  toast(editingId ? "Entry updated" : `Added ${fmtDur(end - start)} of ${catOf($("mCat").value).name}`);
+  resetForm(); render();
+});
+$("mCancel").addEventListener("click", resetForm);
+
+$("entries").addEventListener("click", ev => {
+  const rm = ev.target.closest("[data-rm]");
+  if (rm) {
+    if (rm.classList.contains("confirm")) { removeEntry(rm.dataset.rm); render(); toast("Entry deleted"); }
+    else { rm.classList.add("confirm"); rm.textContent = "Confirm"; setTimeout(() => { if (rm.isConnected) { rm.classList.remove("confirm"); rm.textContent = "Delete"; } }, 3000); }
+    return;
+  }
+  const ed = ev.target.closest("[data-edit]");
+  if (ed) {
+    const e = allEntries().find(x => x.id === ed.dataset.edit); if (!e) return;
+    editingId = e.id;
+    $("mCat").value = e.catId; $("mDate").value = dateInput(e.start);
+    const s = new Date(e.start), en = new Date(e.end);
+    $("mStart").value = `${pad(s.getHours())}:${pad(s.getMinutes())}`;
+    $("mEnd").value = `${pad(en.getHours())}:${pad(en.getMinutes())}`;
+    $("mNote").value = e.note || "";
+    $("mSubmit").textContent = "Save changes"; $("mCancel").hidden = false;
+    $("mMsg").textContent = "Editing an entry.";
+    $("manual").scrollIntoView({ behavior: "smooth", block: "center" });
+    $("mStart").focus({ preventScroll: true });
+  }
+});
+
+$("catList").addEventListener("change", ev => {
+  const row = ev.target.closest("[data-id]"); if (!row) return;
+  const f = ev.target.dataset.f, v = ev.target.value.trim();
+  if (f === "name" && !v) { ev.target.value = catOf(row.dataset.id).name; return; }
+  S = { ...S, categories: S.categories.map(c => c.id === row.dataset.id ? { ...c, [f]: v } : c) };
+  persistState(); render();
+});
+$("catList").addEventListener("click", ev => {
+  const b = ev.target.closest("[data-del]"); if (!b) return;
+  if (!b.classList.contains("confirm")) { b.classList.add("confirm"); b.textContent = "Confirm"; return; }
+  if (S.categories.length <= 1) { toast("Keep at least one activity."); return; }
+  const id = b.dataset.del;
+  S = { ...S, categories: S.categories.filter(c => c.id !== id), running: S.running && S.running.catId === id ? null : S.running };
+  persistState(); renderCatList(); render();
+  toast("Activity removed. Past entries stay, marked as removed.");
+});
+$("addCat").addEventListener("click", () => {
+  const name = $("newName").value.trim(); if (!name) { $("newName").focus(); return; }
+  S = { ...S, categories: [...S.categories, { id: "c" + uid(), name, color: $("newColor").value }] };
+  $("newName").value = ""; persistState(); renderCatList(); render();
+});
+$("newName").addEventListener("keydown", ev => { if (ev.key === "Enter") $("addCat").click(); });
+
+function buildCsv() {
+  const today0 = startOfDay(Date.now()), from = addDays(today0, -(range - 1));
+  const q = s => `"${String(s ?? "").replace(/"/g, '""')}"`;
+  const rows = allEntries().filter(e => e.end > from).sort((a, b) => a.start - b.start).map(e =>
+    [dateInput(e.start), fmtTime(e.start), fmtTime(e.end), Math.round((e.end - e.start) / 60000), catOf(e.catId).name, e.note].map(q).join(","));
+  return ["date,start,end,minutes,activity,note", ...rows].join("\n");
+}
+function saveFile(name, text, type) {
+  const url = URL.createObjectURL(new Blob([text], { type }));
+  const a = document.createElement("a"); a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
+}
+$("exportBtn").addEventListener("click", () => {
+  saveFile(`timecard-${dateInput(Date.now())}.csv`, buildCsv(), "text/csv");
+  $("exportMsg").textContent = "CSV downloaded.";
+});
+$("backupBtn").addEventListener("click", () => {
+  saveFile(`timecard-backup-${dateInput(Date.now())}.json`, JSON.stringify({ app: "daily-timecard", version: 1, state: S, months }), "application/json");
+  $("exportMsg").textContent = "Backup downloaded. Keep it somewhere safe, like Google Drive.";
+});
+$("restoreBtn").addEventListener("click", () => $("restoreFile").click());
+$("restoreFile").addEventListener("change", async ev => {
+  const f = ev.target.files[0]; ev.target.value = ""; if (!f) return;
+  try {
+    const x = JSON.parse(await f.text());
+    if (x.app !== "daily-timecard" || !x.state || !x.months) throw new Error("bad");
+    // merge: entries from the backup are added, existing ones kept
+    const merged = { ...months };
+    for (const mid in x.months) merged[mid] = { ...(merged[mid] || {}), ...x.months[mid] };
+    months = merged;
+    const ids = new Set(S.categories.map(c => c.id));
+    S = { ...S, categories: [...S.categories, ...(x.state.categories || []).filter(c => !ids.has(c.id))] };
+    saveLocal(); render();
+    toast("Backup restored");
+  } catch (e) { toast("That file isn't a Timecard backup."); }
+});
+
+/* ---------- boot ---------- */
+try { const r = +localStorage.getItem(LS_KEY + "-range"); if ([1, 7, 30].includes(r)) range = r; } catch (e) {}
+document.querySelectorAll(".tabs button").forEach(x => x.setAttribute("aria-pressed", String(+x.dataset.range === range)));
+loadLocal();
+if (S.running && S.running.note) $("nowNote").value = S.running.note;
+resetForm();
+render();
+
+setInterval(() => {
+  if (S.running) $("clock").textContent = fmtClock(Date.now() - S.running.start);
+}, 1000);
+setInterval(() => { renderStats(); renderCard(); }, 30000);
+document.addEventListener("visibilitychange", () => { if (!document.hidden) render(); });
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => navigator.serviceWorker.register("sw.js").catch(() => {}));
+}
+if (navigator.storage && navigator.storage.persist) navigator.storage.persist().catch(() => {});
+// keep other open tabs in step
+window.addEventListener("storage", ev => { if (ev.key === LS_KEY) { loadLocal(); render(); } });
+</script>
+</body>
+</html>
